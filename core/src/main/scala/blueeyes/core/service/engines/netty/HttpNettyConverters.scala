@@ -47,8 +47,8 @@ object HttpNettyConverters {
     case _ => HttpMethods.CUSTOM(method.getName)
   }
 
-  def fromNettyRequest(request: NettyHttpRequest, remoteAddress: SocketAddress): Option[ByteChunk] => HttpRequest[ByteChunk] = {
-    (content: Option[ByteChunk]) => {
+  def fromNettyRequest(request: NettyHttpRequest, remoteAddress: SocketAddress): Validation[Exception, Option[ByteChunk] => HttpRequest[ByteChunk]] = {
+    try {
       val parameters          = getParameters(request.getUri)
       val headers             = buildHeaders(request.getHeaders)
 
@@ -57,7 +57,10 @@ object HttpNettyConverters {
       val remoteHost  = remoteIp.orElse(Some(remoteAddress).collect { case x: InetSocketAddress => x.getAddress })
       val version     = fromNettyVersion(request.getProtocolVersion)
 
-      HttpRequest(fromNettyMethod(request.getMethod), URI(request.getUri), parameters, headers, content, remoteHost, version)
+      Success((content: Option[ByteChunk]) => HttpRequest(fromNettyMethod(request.getMethod), URI(request.getUri), parameters, headers, content, remoteHost, version))
+    } catch {
+      // netty blows up sometimes
+      case ex: Exception => Failure(ex)
     }
   }
 

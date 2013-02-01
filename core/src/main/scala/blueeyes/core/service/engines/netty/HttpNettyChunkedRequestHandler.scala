@@ -39,28 +39,33 @@ private[engines] class HttpNettyChunkedRequestHandler(chunkSize: Int)(implicit e
       case nettyRequest: NettyRequest => 
         if (is100ContinueExpected(nettyRequest)) Channels.write(ctx, Channels.succeededFuture(ctx.getChannel), CONTINUE.duplicate())
 
-        val httpRequestBuilder = fromNettyRequest(nettyRequest, event.getRemoteAddress)
-        val nettyContent = nettyRequest.getContent
+        fromNettyRequest(nettyRequest, event.getRemoteAddress) match { 
+          case Success(httpRequestBuilder) =>
+            val nettyContent = nettyRequest.getContent
 
-        val content: Option[ByteChunk] = if (nettyRequest.isChunked) {
-          val head = Chain.incomplete
-          if (nettyContent.readable()) {
-            chain = Chain.incomplete
-            head.promise.success(Some((nettyContent.toByteBuffer, chain)))
-          } else {
-            chain = head
-          }
+            val content: Option[ByteChunk] = if (nettyRequest.isChunked) {
+              val head = Chain.incomplete
+              if (nettyContent.readable()) {
+                chain = Chain.incomplete
+                head.promise.success(Some((nettyContent.toByteBuffer, chain)))
+              } else {
+                chain = head
+              }
 
-          Some(Right(StreamT.unfoldM[Future, ByteBuffer, Chain](head) { _.promise }))
-        } else {
-          if (nettyContent.readable()) {
-            Some(Left(nettyContent.toByteBuffer)) 
-          } else {
-            None
-          }
+              Some(Right(StreamT.unfoldM[Future, ByteBuffer, Chain](head) { _.promise }))
+            } else {
+              if (nettyContent.readable()) {
+                Some(Left(nettyContent.toByteBuffer)) 
+              } else {
+                None
+              }
+            }
+
+            Channels.fireMessageReceived(ctx, httpRequestBuilder(content), event.getRemoteAddress)
+
+          case Failure(error) =>
+            Channels.fireExceptionCaught(ctx, error)  
         }
-
-        Channels.fireMessageReceived(ctx, httpRequestBuilder(content), event.getRemoteAddress)
 
       case chunk: NettyChunk =>  
         val current = chain
